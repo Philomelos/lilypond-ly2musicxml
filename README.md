@@ -10,17 +10,17 @@ A Lilypond to MusicXML converter using LilyPond-engravers
 
 29-08-2012:
 * So far can only be translated notes with following elements:
-<note>
-    <pitch>
-        <step/>
-        <alter/>?
-        <octave/>
-    </pitch>
-    <accidental/>?
-    <duration/>
-    <type/>
-    <dot/>*
-</note>
+&lt;note&gt;
+    &lt;pitch&gt;
+        &lt;step/&gt;
+        &lt;alter/&gt;?
+        &lt;octave/&gt;
+    &lt;/pitch&gt;
+    &lt;accidental/&gt;?
+    &lt;duration/&gt;
+    &lt;type/&gt;
+    &lt;dot/&gt;*
+&lt;/note>
 ('?' stands for zero or one, '*' for zero to "infinity")
 
 28-08-2012:
