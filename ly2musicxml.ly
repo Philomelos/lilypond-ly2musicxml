@@ -1,4 +1,5 @@
 \version "2.16.0"
+\relative c' { r8. d4 cis8.. d4 f a c\breve }
 
 #(use-modules (ice-9 regex)
 	     (srfi srfi-1)
@@ -14,6 +15,7 @@
 #(define xml-output (open-file "output.xml" "w"))
 #(define print (lambda(x) (display (musicxml-node->string x) xml-output)))
 #(define print-all (lambda(mylist) (map (lambda (x) (print x)) mylist)))
+
 #(define ly2musicxml-pitches
   '((0 . "C")
     (1 . "D")
@@ -48,6 +50,11 @@
     ("'" . "&apos;")
     ("&" . "&amp;")))
 
+#(define (repeat what n)
+  (if (<= n 1)
+     (list what)
+     (append (list what) (repeat what (- n 1)))))
+
 #(define-class <xml-node> ()
   (name #:init-value "" #:accessor node-name #:init-keyword #:name)
   (value #:init-value "" #:accessor node-value #:init-keyword #:value)
@@ -58,42 +65,55 @@
 	    #:accessor node-children
 	    #:init-keyword #:children))
 
+#(define-method (append-child (node <xml-node>) (child <xml-node>))
+       (set! (node-children node) (append (node-children node) (list child))))
+
 #(define (musicxml-node->string node)
   (let ((xml-name (node-name node)))
     (string-append
-     (if xml-name (open-tag xml-name '() '()) "")
-     (if (equal? (node-value node) "")
-	 (string-append
-	  (if xml-name "\n" "")
-	  (apply string-append (map musicxml-node->string (node-children node))))
-	 (node-value node))
-     (if xml-name (close-tag xml-name) "")
+     (if (and (equal? (node-value node) "") (equal? (node-children node) '()))
+	(if xml-name (open-close-tag xml-name) "")
+	(string-append
+	    (if xml-name (open-tag xml-name '() '()) "")
+	    (if (equal? (node-value node) "")
+		(string-append
+		(if xml-name "\n" "")
+		(apply string-append (map musicxml-node->string (node-children node))))
+		(node-value node))
+	    (if xml-name (close-tag xml-name) "")))
      (if xml-name "\n" ""))))
-
-#(define (xml-node->string node)
-  (string-append
-   "\n"
-   (open-tag (node-name node) (node-attributes node) '())
-   (if (equal? (node-value node) "")
-       (string-append
-	(apply string-append (map xml-node->string (node-children node))))
-       (node-value node))
-   "\n"
-   (close-tag (node-name node))))
 
 #(define (note->xml-node event)
   (let* ((pitch (ly:event-property event 'pitch))
 	(alteration (ly:pitch-alteration pitch))
-	(duration (ly:event-property event 'length)))
+	(dlength (ly:event-property event 'length))
+	(duration (ly:event-property event 'duration))
+	(dots (ly:duration-dot-count duration)))
     (make <xml-node>
       #:name 'note
       #:children
       (apply
        append
 	(if (ly:pitch? pitch) (list (pitch->xml-node pitch)) '())
-	(if (ly:moment? duration) (list (duration->xml-node duration)) '())
-	(if (ly:moment? duration) (list (type->xml-node duration)) '())
+	(if (ly:moment? dlength) (list (duration->xml-node dlength)) '())
+	(if (ly:moment? dlength) (list (type->xml-node dlength)) '())
 	(if (!= alteration 0) (list (accidental->xml-node alteration)) '())
+	(if (>= dots 1) (repeat (make-xml-node 'dot) dots) '())
+	'()))))
+
+#(define (rest->xml-node event)
+  (let* ((dlength (ly:event-property event 'length))
+	(duration (ly:event-property event 'duration))
+	(dots (ly:duration-dot-count duration)))
+    (make <xml-node>
+      #:name 'note
+      #:children
+      (apply
+       append
+	(list (make-xml-node 'rest))
+	(if (ly:moment? dlength) (list (duration->xml-node dlength)) '())
+	(if (ly:moment? dlength) (list (type->xml-node dlength)) '())
+	(if (>= dots 1) (repeat (make-xml-node 'dot) dots) '())
 	'()))))
 
 #(define (pitch->xml-node pitch)
@@ -138,7 +158,12 @@
 #(define (type->xml-node duration)
   (make <xml-node>
     #:name 'type
-    #:value (ly:assoc-get (/ (ly:moment-main-numerator duration) (ly:moment-main-denominator duration)) ly2musicxml-types)))
+    ;; transforms the rational fraction to the largest rational power of 2 not larger than  the fraction
+    #:value (ly:assoc-get (expt 2 (inexact->exact (floor (/ (log (/ (ly:moment-main-numerator duration) (ly:moment-main-denominator duration))) (log 2))))) ly2musicxml-types)))
+
+#(define (make-xml-node name)
+    (make <xml-node>
+      #:name name))
 
 #(define (assert x)
   (if x
@@ -178,13 +203,8 @@
 #(define (close-tag name)
   (string-append "</" (symbol->string name) ">"))
 
-#(define (music-to-xml music port)
-  "Dump XML-ish stuff to @var{port}."
-
-  (display (dtd-header) port)
-  (display (open-tag 'music '((type . score)) '()) port)
-;;  (display (xml-node->string (music->xml-node music)) port)
-  (display (close-tag 'music) port))
+#(define (open-close-tag name)
+  (string-append "<" (symbol->string name) "/>"))
 
 #(define (music-to-musicxml music port)
   "Dump MusicXML-ish stuff to @var{port}."
@@ -193,8 +213,6 @@
   (display (open-tag 'music '((type . score)) '()) port)
 ;;  (display (musicxml-node->string (music->xml-node music)) port)
   (display (close-tag 'music) port))
-
-\relative c' { c8 cis d4 f a c\breve c\maxima }
 
 \layout {
   \context {
@@ -207,13 +225,14 @@
 	(make-engraver
 	 (listeners
 	  ((note-event engraver event)
-	   (print (note->xml-node event))))
+	   (print (note->xml-node event)))
+	  ((rest-event engraver event)
+	   (print (rest->xml-node event))))
 	 ((finalize trans)
 	  (display "\nFinalize context\n\n")
 	  (display context)
 	  (display (list "\n\n"
 		    (ly:context-current-moment
-		     (ly:translator-context trans)) "\n\n"))
-	 )))))
+		     (ly:translator-context trans)) "\n\n")))))))
   }
 }
