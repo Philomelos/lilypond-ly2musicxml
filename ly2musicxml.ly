@@ -11,7 +11,7 @@
    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>
    <!DOCTYPE score-partwise PUBLIC \"-//Recordare//DTD MusicXML 3.0 Partwise//EN\" \"http://www.musicxml.org/dtds/partwise.dtd\">\n"
   ))
-
+  
 #(define xml-output (open-file "output.xml" "w"))
 #(define print (lambda(x) (display (musicxml-node->string x) xml-output)))
 #(define print-all (lambda(mylist) (map (lambda (x) (print x)) mylist)))
@@ -72,9 +72,9 @@
   (let ((xml-name (node-name node)))
     (string-append
      (if (and (equal? (node-value node) "") (equal? (node-children node) '()))
-	(if xml-name (open-close-tag xml-name) "")
+	(if xml-name (open-close-tag xml-name (node-attributes node)) "")
 	(string-append
-	    (if xml-name (open-tag xml-name '() '()) "")
+	    (if xml-name (open-tag xml-name (node-attributes node)) "")
 	    (if (equal? (node-value node) "")
 		(string-append
 		(if xml-name "\n" "")
@@ -82,6 +82,16 @@
 		(node-value node))
 	    (if xml-name (close-tag xml-name) "")))
      (if xml-name "\n" ""))))
+
+#(define (measure->xml-node number implicit)
+    (make <xml-node>
+      #:name 'measure
+      #:attributes
+      (apply
+       append
+	(if (integer? number) '((number . number)) '())
+	(if (or (equal? implicit "yes") (equal? implicit "no")) '((implicit . implicit)) '())
+	'())))
 
 #(define (note->xml-node event)
   (let* ((pitch (ly:event-property event 'pitch))
@@ -179,11 +189,7 @@
       (re-sub (caar alist) (cdar alist)
 	      (re-sub-alist string (cdr alist)))))
 
-#(define (open-tag tag attrs exceptions)
-  (define (candidate? x)
-    (not (memq (car x) exceptions)))
-
-  (define (dump-attr sym-val)
+#(define (dump-attr sym-val)
     (let* ((sym (car sym-val))
 	   (val (cdr sym-val)))
 
@@ -195,22 +201,26 @@
 	 (re-sub-alist s xml-entities-alist))
        "\"")))
 
+#(define (open-tag tag attrs)
   (string-append
    "<" (symbol->string tag)
-   (apply string-append (map dump-attr (filter candidate? attrs)))
+   (apply string-append (map dump-attr attrs))
    ">"))
+
+#(define (open-close-tag tag attrs)
+  (string-append
+   "<" (symbol->string tag)
+   (apply string-append (map dump-attr attrs))
+   "/>"))
 
 #(define (close-tag name)
   (string-append "</" (symbol->string name) ">"))
-
-#(define (open-close-tag name)
-  (string-append "<" (symbol->string name) "/>"))
 
 #(define (music-to-musicxml music port)
   "Dump MusicXML-ish stuff to @var{port}."
 
   (display (dtd-header) port)
-  (display (open-tag 'music '((type . score)) '()) port)
+  (display (open-tag 'music '((type . score))) port)
 ;;  (display (musicxml-node->string (music->xml-node music)) port)
   (display (close-tag 'music) port))
 
@@ -227,7 +237,9 @@
 	  ((note-event engraver event)
 	   (print (note->xml-node event)))
 	  ((rest-event engraver event)
-	   (print (rest->xml-node event))))
+	   (print (rest->xml-node event)))
+	  ((music-event engraver event)
+	   (print (measure->xml-node 1 "yes"))))
 	 ((finalize trans)
 	  (display "\nFinalize context\n\n")
 	  (display context)
